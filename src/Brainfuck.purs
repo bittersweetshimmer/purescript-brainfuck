@@ -1,172 +1,183 @@
 module Brainfuck where
 
-import Brainfuck.Cell (Cell, cellToInt)
-import Brainfuck.Command (Command(..))
-import Brainfuck.Natural (Natural(..))
-import Brainfuck.Program (Program(..), parseProgram)
-import Brainfuck.State (State(..), mkState)
+import Prelude
+
+import Brainfuck.Cell (Cell, cellToInt, mkCell)
+import Brainfuck.Command (Command(..)) as Command
+import Brainfuck.Command (Command)
+import Brainfuck.Console (CONSOLE, read, runConsole, write)
+import Brainfuck.Console.Mock (Mock, runMockConsole)
+import Brainfuck.Program (Program(..))
+import Brainfuck.State (State, initialState)
 import Brainfuck.Step (Step(..))
 import Brainfuck.Tape (Tape(..))
-import Brainfuck.Tape (forward, backward) as T
-import Control.Applicative (pure)
-import Control.Bind (bind, discard, (>>=))
-import Control.Comonad (extract)
-import Control.Monad.State (StateT, evalStateT, execStateT, lift, runStateT, state)
-import Data.Char (fromCharCode)
-import Data.Eq ((==))
-import Data.Function (const, ($), (<<<), (>>>), flip)
-import Data.HeytingAlgebra (not)
+import Brainfuck.Tape (forward, backward) as Tape
+import Data.Char (fromCharCode, toCharCode)
 import Data.List ((!!))
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
-import Data.Ring (sub, (-))
-import Data.Semigroup ((<>))
-import Data.Semiring (add, one, zero, (+))
-import Data.String (singleton, codePointFromChar)
 import Data.Tuple (Tuple(..))
-import Data.Unit (Unit, unit)
 import Effect (Effect)
-import Effect.Class.Console (log)
+import Run (Run, extract, runBaseEffect)
+import Run.Reader (READER, ask, runReader)
+import Run.State (STATE, get, modify, put, runState)
 
-type Brainfuck a = StateT State Effect a
+jump :: forall r. Int -> Run (state :: STATE State | r) Unit
+jump n = get >>= \state -> put (state { counter = n })
 
-getCell :: Brainfuck Cell
-getCell = state $ \s@(State { tape }) -> Tuple (extract tape) s
+setCell :: forall r. Cell -> Run (state :: STATE State | r) Unit
+setCell c = modify $ \state@{ tape: (Tape tape@{ focus }) } -> state { tape = (Tape (tape { focus = c })) }
 
-getBuffer :: Brainfuck String
-getBuffer = state $ \s@(State { buffer }) -> Tuple buffer s
+getCell :: forall r. Run (state :: STATE State | r) Cell
+getCell = get >>= \{ tape: (Tape { focus }) } -> pure focus
 
-clearBuffer :: Brainfuck Unit
-clearBuffer = state $ \(State { tape, program, instruction, buffer }) -> Tuple unit (State { tape, program, instruction, buffer: "" })
+modifyCell :: forall r. (Cell -> Cell) -> Run (state :: STATE State | r) Unit
+modifyCell f = do
+    cell <- getCell
+    setCell $ f cell
 
-getProgram :: Brainfuck Program
-getProgram = state $ \s@(State { program }) -> Tuple program s
+getCounter :: forall r. Run (state :: STATE State | r) Int
+getCounter = get >>= \{ counter } -> pure counter
 
-getCommand :: Brainfuck (Maybe Command)
-getCommand = state $ \s@(State { program: Program commands, instruction }) -> Tuple (commands !! instruction) s
+incrementCounter :: forall r. Run (state :: STATE State | r) Unit
+incrementCounter = do
+    counter <- getCounter
+    jump $ counter + 1
 
-modifyCell :: (Cell -> Cell) -> Brainfuck Unit
-modifyCell f = state $ \(State { tape: (Tape { focus, left, right }), program, instruction, buffer }) -> Tuple unit (State { tape: Tape { focus: f focus, left, right }, program, instruction, buffer })
+forward :: forall r. Run (state :: STATE State | r) Unit
+forward = modify $ \state@{ tape } -> state { tape = Tape.forward tape }
 
-forward :: Brainfuck Unit
-forward = state $ \(State { tape, program, instruction, buffer }) -> Tuple unit (State { tape: T.forward tape, program, instruction, buffer })
+backward :: forall r. Run (state :: STATE State | r) Unit
+backward = modify $ \state@{ tape } -> state { tape = Tape.backward tape }
 
-backward :: Brainfuck Unit
-backward = state $ \(State { tape, program, instruction, buffer }) -> Tuple unit (State { tape: T.backward tape, program, instruction, buffer })
+getCommandAt :: forall r. Int -> Run (state :: STATE State, reader :: READER Program | r) (Maybe Command)
+getCommandAt n = do
+    Program commands <- ask
+    pure $ commands !! n
 
-increment :: Brainfuck Unit
-increment = state $ \(State { tape, program, instruction, buffer }) -> Tuple unit (State { tape, program, instruction: instruction + 1, buffer })
+getCommand :: forall r. Run (state :: STATE State, reader :: READER Program | r) (Maybe Command)
+getCommand = do
+    index <- getCounter
+    Program commands <- ask
+    pure $ commands !! index
 
-getInstruction :: Brainfuck Int
-getInstruction = state $ \s@(State { instruction }) -> Tuple instruction s
+findLoopEnd :: forall r. Run (state :: STATE State, reader :: READER Program | r) (Maybe Int)
+findLoopEnd = do
+    from <- getCounter
+    result <- go (from + 1) 0
+    pure $ result
+    where 
+        go :: Int -> Int -> Run (state :: STATE State, reader :: READER Program | r) (Maybe Int)
+        go i depth = do
+            maybeCommand <- getCommandAt i
+            case maybeCommand of 
+                Just c -> case c of
+                    Command.JumpNonZero -> if depth == 0
+                        then pure $ Just $ i + 1
+                        else go (i + 1) (depth - 1)
+                    Command.JumpZero -> go (i + 1) (depth + 1)
+                    _ -> go (i + 1) depth
+                Nothing -> pure $ Nothing
 
-getCommandAt :: Int -> Brainfuck (Maybe Command)
-getCommandAt n = state $ \s@(State { program: Program commands }) -> Tuple (commands !! n) s
+findLoopStart :: forall r. Run (state :: STATE State, reader :: READER Program | r) (Maybe Int)
+findLoopStart = do
+    from <- getCounter
+    result <- go (from - 1) 0
+    pure $ result
+    where 
+        go :: Int -> Int -> Run (state :: STATE State, reader :: READER Program | r) (Maybe Int)
+        go i depth = do
+            maybeCommand <- getCommandAt i
+            case maybeCommand of 
+                Just c -> case c of
+                    Command.JumpZero -> if depth == 0
+                        then pure $ Just $ i + 1
+                        else go (i - 1) (depth - 1)
+                    Command.JumpNonZero -> go (i - 1) (depth + 1)
+                    _ -> go (i - 1) depth
+                Nothing -> pure $ Nothing
 
-write :: Char -> Brainfuck Unit
-write c = state $ \(State { tape, program, instruction, buffer }) -> Tuple unit (State { tape, program, instruction, buffer: buffer <> (singleton $ codePointFromChar $ c) })
-
-flush :: Brainfuck Unit
-flush = do
-    buffer <- getBuffer
-    log >>> lift $ buffer
-    clearBuffer
-
-continue :: Brainfuck Step
+continue :: forall f. Applicative f => f Step
 continue = pure Continue
 
-invalid :: Int -> Brainfuck Step
-invalid = pure <<< InvalidJump
-
-end :: Brainfuck Step
+end :: forall f. Applicative f => f Step
 end = pure End
 
-next :: Brainfuck Step
-next = increment >>= const continue
+invalid :: forall f. Applicative f => Int -> f Step
+invalid = pure <<< InvalidJump
 
-jump :: Int -> Brainfuck Step
-jump n = state $ \(State { tape, program, instruction, buffer }) -> Tuple Continue (State { tape, program, buffer, instruction: n })
+executeCommand :: forall r. Command -> Run (console :: CONSOLE, state :: STATE State, reader :: READER Program | r) Step
+executeCommand Command.Write = do
+    value <- getCell
+    write <<< fromMaybe '?' <<< fromCharCode <<< cellToInt $ value
+    incrementCounter
+    continue
+executeCommand Command.Read = do
+    character <- read
+    setCell <<< mkCell <<< toCharCode $ character
+    incrementCounter
+    continue
+executeCommand Command.IncrementPointer = do
+    forward
+    incrementCounter
+    continue
+executeCommand Command.DecrementPointer = do
+    backward
+    incrementCounter
+    continue
+executeCommand Command.Increment = do
+    modifyCell $ add one
+    incrementCounter
+    continue
+executeCommand Command.Decrement = do
+    modifyCell $ flip sub one
+    incrementCounter
+    continue
+executeCommand Command.JumpZero = do
+    value <- getCell
+    from <- getCounter
+    if value == zero
+        then do
+            found <- findLoopEnd
+            case found of
+                Just to -> do
+                    jump to
+                    continue
+                Nothing -> do
+                    invalid from
+        else do
+            jump (from + 1)
+            continue
+executeCommand Command.JumpNonZero = do
+    value <- getCell
+    from <- getCounter
+    if not $ value == zero
+        then do
+            found <- findLoopStart
+            case found of
+                Just to -> do
+                    jump to
+                    continue
+                Nothing -> do
+                    invalid from
+        else do
+            jump (from + 1)
+            continue
 
-findLoopEnd :: Brainfuck (Maybe Int)
-findLoopEnd = do
-    instruction <- getInstruction
-    go (instruction + 1) 0
-    where
-        go :: Int -> Int -> Brainfuck (Maybe Int)
-        go i depth = getCommandAt i >>= \maybeCommand -> case maybeCommand of
-            Just command -> case command of
-                JumpNonZero -> if depth == 0
-                    then pure $ Just $ i + 1
-                    else go (i + 1) (depth - 1)
-                JumpZero -> go (i + 1) (depth + 1)
-                _ -> go (i + 1) depth
-            _ -> pure $ Nothing
+step :: forall r. Run (console :: CONSOLE, state :: STATE State, reader :: READER Program | r) Step
+step = getCommand >>= maybe end executeCommand
 
-findLoopStart:: Brainfuck (Maybe Int)
-findLoopStart = do
-    instruction <- getInstruction
-    go (instruction - 1) 0
-    where
-        go :: Int -> Int -> Brainfuck (Maybe Int)
-        go i depth = getCommandAt i >>= maybe (pure Nothing) (\command -> case command of
-            JumpZero -> if depth == 0
-                then pure $ Just $ i + 1
-                else go (i - 1) (depth - 1)
-            JumpNonZero -> go (i - 1) (depth + 1)
-            _ -> go (i - 1) depth)
-
-runCommand :: Command -> Brainfuck Step
-runCommand Increment = modifyCell (add one) >>= const next
-runCommand Decrement = modifyCell (flip sub one) >>= const next
-runCommand IncrementPointer = forward >>= const next
-runCommand DecrementPointer = backward >>= const next
-runCommand Write = getCell >>= cellToInt >>> fromCharCode >>> fromMaybe '?' >>> write >>= const next 
-runCommand Read = next
-runCommand JumpZero = do
-    cell <- getCell
-    from <- getInstruction
-    if cell == zero
-        then findLoopEnd >>= maybe (invalid from) jump
-        else next
-runCommand JumpNonZero = do
-    cell <- getCell
-    from <- getInstruction
-    if not $ cell == zero
-        then findLoopStart >>= maybe (invalid from) jump
-        else next
-
-step :: Brainfuck Step
-step = getCommand >>= maybe end runCommand
-
-steps :: Natural -> Brainfuck Step
-steps Zero = continue
-steps (Succ n) = do
+brainfuck :: forall r. Run (console :: CONSOLE, state :: STATE State, reader :: READER Program | r) Step
+brainfuck = do
     result <- step
     case result of
-        Continue -> steps n
+        Continue -> brainfuck
         _ -> pure $ result
 
-brainfuck :: Brainfuck Step
-brainfuck = step >>= \result -> case result of
-    Continue -> brainfuck
-    _ -> pure $ result
+runBrainfuck :: Program -> Effect (Tuple State Step)
+runBrainfuck program = brainfuck # runState initialState # runReader program # runConsole # runBaseEffect
 
-eval :: String -> Effect (Maybe String)
-eval src = case parseProgram src of
-    Just program -> do 
-        buffer <- evalStateT (brainfuck >>= \_ -> getBuffer) $ mkState program
-        pure $ Just $ buffer
-    _ -> pure Nothing
+runMock :: Mock -> Program -> Tuple Mock (Tuple State Step)
+runMock mock program = brainfuck # runState initialState # runReader program # runMockConsole mock # extract
 
-exec :: String -> Effect (Maybe State)
-exec src = case parseProgram src of
-    Just program -> do 
-        state <- execStateT brainfuck $ mkState program
-        pure $ Just $ state
-    _ -> pure Nothing
-
-run :: String -> Effect (Maybe (Tuple Step State))
-run src = case parseProgram src of
-    Just program -> do 
-        result <- runStateT brainfuck $ mkState program
-        pure $ Just $ result
-    _ -> pure Nothing
+evalMock :: Mock -> Program -> Mock
+evalMock mock program = let Tuple m _ = runMock mock program in m

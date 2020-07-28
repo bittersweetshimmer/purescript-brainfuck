@@ -7,10 +7,13 @@ You can edit this file as you like.
   [ "assert"
   , "console"
   , "effect"
+  , "free"
   , "lists"
   , "psci-support"
+  , "run"
   , "strings"
   , "transformers"
+  , "variant"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]

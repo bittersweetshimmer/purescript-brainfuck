@@ -9,3 +9,5 @@ instance showStep :: Show Step where
     show Continue = "Continue"
     show (InvalidJump n) = "InvalidJump " <> show n
     show End = "End"
+
+derive instance eqStep :: Eq Step

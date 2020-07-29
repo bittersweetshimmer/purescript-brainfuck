@@ -2,26 +2,24 @@ module Test.Main where
 
 import Prelude
 
-import Brainfuck (evalMock)
+import Brainfuck (runMock)
 import Brainfuck.Cell (mkCell)
 import Brainfuck.Command (Command(..))
-import Brainfuck.Console.Mock (Mock)
 import Brainfuck.Program (Program(..), parseProgram)
+import Brainfuck.Step (Step(..))
 import Brainfuck.Stream (Stream, head, iterate, prepend, streamOf, tail, (:>))
 import Brainfuck.Tape (Tape(..), backward, forward)
 import Control.Comonad (extract)
 import Data.Array (reverse)
 import Data.Char (toCharCode)
 import Data.List (List(..), (:), fromFoldable)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), isJust)
 import Data.String.CodeUnits (toCharArray)
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
-import Test.Unit (Test, suite, test)
+import Test.Unit (suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
-
-testProgram :: Mock -> Program -> Array Int -> Test
-testProgram mock program output = Assert.equal (evalMock mock program).output $ output # reverse # fromFoldable <#> mkCell
 
 main :: Effect Unit
 main = runTest do
@@ -50,7 +48,7 @@ main = runTest do
       Assert.equal (head stream) 0
       Assert.equal (head $ tail stream) 1
       Assert.equal (head $ tail $ tail stream) 2
-    test "map - stream of squared natural number" do
+    test "map - stream of squared natural numbers" do
       let stream = map (\x -> x * x) (iterate (add 1) 0) :: Stream Int
       Assert.equal (head stream) 0
       Assert.equal (head $ tail stream) 1
@@ -76,12 +74,39 @@ main = runTest do
       Assert.equal (parseProgram source) Nothing
   
   suite "Brainfuck" do
-    test ".+.,.>. outputs 0, 1, 42, 0" do
-      let program = Program (Write : Increment : Write : Read : Write : IncrementPointer : Write : Nil) 
-      let mock = { output: Nil, input: mkCell 42 :> mkCell 69 :> mkCell 1 :> streamOf zero }
-      testProgram mock program [0, 1, 42, 0]
-    test "\"Hello world\" program parses correctly and outputs \"hello world\"" do
-      let helloworld = parseProgram "+[-[<<[+[--->]-[<<<]]]>>>-]>-.---.>..>.<<<<-.<+.>>>>>.>.<<.<-."
-      let mock = { output: Nil, input: mkCell 42 :> mkCell 69 :> mkCell 1 :> streamOf zero }
+    suite "Program \"[\"" do
+      let program = Program (JumpZero : Nil) 
+      let mock = { output: Nil, input: streamOf 0 <#> mkCell }
+      let Tuple _ (Tuple _ step) = runMock mock program
 
-      maybe (Assert.assert "hello world parsing failure" false) (\program -> testProgram mock program $ "hello world" # toCharArray <#> toCharCode) helloworld
+      test "ends with invalid jump from position 0" $ Assert.equal step (InvalidJump 0)
+    suite "Program \".+.,.>,.\" with input stream 42, 69, 1, 0" do
+      let program = Program (Write : Increment : Write : Read : Write : IncrementPointer : Read : Write : Nil) 
+      let mock = { output: Nil, input: 42 :> 69 :> 1 :> streamOf 0 <#> mkCell }
+      let Tuple { output } (Tuple state step) = runMock mock program
+
+      test "outputs 0, 1, 42, 69" $ Assert.equal output $ [0, 1, 42, 69] # reverse # fromFoldable <#> mkCell
+      test "ends with counter value of 8" $ Assert.equal state.counter 8
+      test "ends with cell value of 69" $ Assert.equal (extract state.tape) (mkCell 69)
+      test "ends successfully" $ Assert.equal step End
+    suite "Program \",[.,]\"" do
+      let program = Program (Read : JumpZero : Write : Read : JumpNonZero : Nil)
+      let mock = { output: Nil, input: 69 :> 1 :> 42 :> streamOf 0 <#> mkCell }
+      let Tuple { output } (Tuple state step) = runMock mock program
+
+      test "pipes its input to output until 0 is entered" $ Assert.equal output $ [69, 1, 42] # reverse # fromFoldable <#> mkCell
+      test "ends successfully" $ Assert.equal step End
+      test "ends with cell value of 0" $ Assert.equal (extract state.tape) zero
+    suite "A hello world program" do
+      let helloworld = parseProgram "+[-[<<[+[--->]-[<<<]]]>>>-]>-.---.>..>.<<<<-.<+.>>>>>.>.<<.<-."
+      let mock = { output: Nil, input: streamOf 0 <#> mkCell }
+
+      test "parses successfully" $ Assert.equal (isJust helloworld) true
+
+      case helloworld of
+        Just program -> do
+          let Tuple { output } (Tuple state step) = runMock mock program
+
+          test "outputs \"hello world\"" $ Assert.equal output $ "hello world" # toCharArray <#> toCharCode # reverse # fromFoldable <#> mkCell
+          test "ends successfully" $ Assert.equal step End
+        Nothing -> pure unit

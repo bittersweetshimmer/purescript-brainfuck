@@ -3,7 +3,6 @@ module Brainfuck.Command where
 import Prelude
 
 import Data.Maybe (Maybe(..))
-import Data.Show (class Show)
 
 data Command =
     IncrementPointer |

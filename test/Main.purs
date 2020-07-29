@@ -3,20 +3,20 @@ module Test.Main where
 import Prelude
 
 import Brainfuck (evalMock)
-import Brainfuck.Cell (Cell, mkCell)
+import Brainfuck.Cell (mkCell)
 import Brainfuck.Command (Command(..))
 import Brainfuck.Console.Mock (Mock)
 import Brainfuck.Program (Program(..), parseProgram)
 import Brainfuck.Stream (Stream, head, iterate, prepend, streamOf, tail, (:>))
-import Brainfuck.Tape (Tape(..), backward, forward, tapeOf)
+import Brainfuck.Tape (Tape(..), backward, forward)
 import Control.Comonad (extract)
 import Data.Array (reverse)
 import Data.Char (toCharCode)
 import Data.List (List(..), (:), fromFoldable)
-import Data.Maybe (Maybe(..), isJust, maybe)
+import Data.Maybe (Maybe(..), maybe)
 import Data.String.CodeUnits (toCharArray)
 import Effect (Effect)
-import Test.Unit (TestF, Test, suite, test)
+import Test.Unit (Test, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
 

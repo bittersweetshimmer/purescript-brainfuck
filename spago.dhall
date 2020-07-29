@@ -15,6 +15,7 @@ You can edit this file as you like.
   , "psci-support"
   , "run"
   , "strings"
+  , "test-unit"
   , "transformers"
   , "variant"
   ]

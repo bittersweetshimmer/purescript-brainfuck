@@ -1,7 +1,9 @@
 module Brainfuck.Command where
 
-import Data.Show (class Show)
+import Prelude
+
 import Data.Maybe (Maybe(..))
+import Data.Show (class Show)
 
 data Command =
     IncrementPointer |
@@ -23,6 +25,8 @@ instance showCommand :: Show Command where
     show Read = "Read"
     show JumpZero = "JumpZero"
     show JumpNonZero = "JumpNonZero"
+
+derive instance eqProgram :: Eq Command
 
 parseCommand :: Char -> Maybe Command
 parseCommand '>' = Just IncrementPointer

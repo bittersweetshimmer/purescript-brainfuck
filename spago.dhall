@@ -4,11 +4,14 @@ You can edit this file as you like.
 -}
 { name = "purescript-brainfuck"
 , dependencies =
-  [ "assert"
+  [ "aff"
+  , "assert"
   , "console"
   , "effect"
   , "free"
   , "lists"
+  , "node-process"
+  , "node-readline"
   , "psci-support"
   , "run"
   , "strings"

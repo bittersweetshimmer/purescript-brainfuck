@@ -2,7 +2,7 @@ module Brainfuck where
 
 import Prelude
 
-import Brainfuck.Cell (Cell, cellToInt, mkCell)
+import Brainfuck.Cell (Cell)
 import Brainfuck.Command (Command(..)) as Command
 import Brainfuck.Command (Command)
 import Brainfuck.Console (CONSOLE, read, runConsole, write)
@@ -12,12 +12,11 @@ import Brainfuck.State (State, initialState)
 import Brainfuck.Step (Step(..))
 import Brainfuck.Tape (Tape(..))
 import Brainfuck.Tape (forward, backward) as Tape
-import Data.Char (fromCharCode, toCharCode)
 import Data.List ((!!))
-import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Maybe (Maybe(..), maybe)
 import Data.Tuple (Tuple(..))
-import Effect (Effect)
-import Run (Run, extract, runBaseEffect)
+import Effect.Aff (Aff)
+import Run (Run, extract, runBaseAff)
 import Run.Reader (READER, ask, runReader)
 import Run.State (STATE, get, modify, put, runState)
 
@@ -107,13 +106,11 @@ invalid = pure <<< InvalidJump
 
 executeCommand :: forall r. Command -> Run (console :: CONSOLE, state :: STATE State, reader :: READER Program | r) Step
 executeCommand Command.Write = do
-    value <- getCell
-    write <<< fromMaybe '?' <<< fromCharCode <<< cellToInt $ value
+    getCell >>= write
     incrementCounter
     continue
 executeCommand Command.Read = do
-    character <- read
-    setCell <<< mkCell <<< toCharCode $ character
+    read >>= setCell
     incrementCounter
     continue
 executeCommand Command.IncrementPointer = do
@@ -173,8 +170,8 @@ brainfuck = do
         Continue -> brainfuck
         _ -> pure $ result
 
-runBrainfuck :: Program -> Effect (Tuple State Step)
-runBrainfuck program = brainfuck # runState initialState # runReader program # runConsole # runBaseEffect
+runBrainfuck :: Program -> Aff (Tuple State Step)
+runBrainfuck program = brainfuck # runState initialState # runReader program # runConsole # runBaseAff
 
 runMock :: Mock -> Program -> Tuple Mock (Tuple State Step)
 runMock mock program = brainfuck # runState initialState # runReader program # runMockConsole mock # extract

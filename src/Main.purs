@@ -2,25 +2,19 @@ module Main where
 
 import Prelude
 
-import Brainfuck (evalMock) as Brainfuck
-import Brainfuck.Console.Mock (Mock) as Brainfuck.Console
-import Brainfuck.Program (Program(..), parseProgram) as Brainfuck
-import Brainfuck.Stream (streamOf)
-
-import Data.List (List(..))
-import Data.Maybe (fromMaybe)
-
+import Brainfuck (runBrainfuck) as Brainfuck
+import Brainfuck.Program (parseProgram) as Brainfuck
+import Data.Array (index)
+import Data.Maybe (Maybe(..))
 import Effect (Effect)
+import Effect.Aff (launchAff_)
 import Effect.Class.Console (log)
-
-helloworld :: Brainfuck.Program
-helloworld = fromMaybe (Brainfuck.Program Nil) (Brainfuck.parseProgram "+[-[<<[+[--->]-[<<<]]]>>>-]>-.---.>..>.<<<<-.<+.>>>>>.>.<<.<-.")
-
-mock :: Brainfuck.Console.Mock
-mock = { input: streamOf '?', output: "" }
-
-result :: Brainfuck.Console.Mock
-result = Brainfuck.evalMock mock helloworld
+import Node.Process (argv) as Process
 
 main :: Effect Unit
-main = log result.output
+main = Process.argv <#> flip index 2 >>= case _ of
+    Just src -> case Brainfuck.parseProgram src of
+        Just program -> launchAff_ $ Brainfuck.runBrainfuck program
+        Nothing -> log "Error: Invalid character."
+    _ -> log "Error: No arguments."
+                    
